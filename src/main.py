@@ -1,19 +1,23 @@
-# src/main.py
+# ==========================================================
+# Program : Klasifikasi Huruf Tulisan Tangan (EMNIST Letters)
+# Metode  : HOG + SVM
+# Evaluasi: Leave-One-Out Cross Validation (LOOCV)
+# ==========================================================
+
 import os
 import time
 import numpy as np
 import pandas as pd
 from sklearn.utils import resample
 from sklearn.svm import SVC
-from sklearn.model_selection import StratifiedKFold, cross_val_predict
+from sklearn.model_selection import LeaveOneOut, cross_val_predict
 from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, f1_score, classification_report
 from skimage.feature import hog
 import cv2
 
 # ========== KONFIGURASI ==========
 DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "emnist-letters-train.csv")
-SAMPLES_PER_CLASS = 500   # 26 kelas x 500 sampel = 13.000 total
-CV_FOLDS = 5              # lebih cepat daripada LOOCV
+SAMPLES_PER_CLASS = 500    # 500 x 26 total 13000
 RANDOM_STATE = 42
 
 # ========== FUNGSI UTILITAS ==========
@@ -40,10 +44,10 @@ def load_and_balance(csv_path, samples_per_class=500):
 
 
 def preprocess_image_vector(vec):
-    """Ubah 1D vector (28x28) jadi citra 2D dan koreksi orientasi agar tegak (EMNIST)"""
+    """Ubah 1D vector (28x28) jadi citra 2D dan koreksi orientasi (tanpa flip)"""
     img = np.reshape(vec, (28, 28)).astype(np.uint8)
-    # ✅ Koreksi orientasi EMNIST agar tegak dan tidak mirror
-    img = np.flipud(img.T)
+    # hanya transpose agar huruf tegak, tanpa pembalikan
+    img = img.T
     return img
 
 
@@ -56,10 +60,11 @@ def extract_hog_features(X):
         feat = hog(img, orientations=9, pixels_per_cell=(8, 8),
                    cells_per_block=(2, 2), block_norm='L2-Hys', feature_vector=True)
         features.append(feat)
-        if (i + 1) % 1000 == 0:
+        if (i + 1) % 100 == 0:
             print(f"  {i+1}/{len(X)} gambar diproses...")
     print(f"✅ Ekstraksi HOG selesai dalam {time.time() - start:.2f} detik.\n")
     return np.array(features)
+
 
 # ========== MAIN PROGRAM ==========
 def main():
@@ -69,21 +74,24 @@ def main():
     # Load dan sampling seimbang
     X_raw, y = load_and_balance(DATA_PATH, samples_per_class=SAMPLES_PER_CLASS)
 
-    # Simpan data mentah untuk visualisasi
+    # Simpan data mentah
     np.save("X_raw.npy", X_raw)
     print("💾 File X_raw.npy berhasil disimpan (data citra mentah untuk visualisasi).")
 
-    # Ekstraksi fitur HOG (dengan orientasi yang sudah benar)
+    # Ekstraksi fitur HOG
     hog_features = extract_hog_features(X_raw)
 
     # Model SVM
     clf = SVC(kernel='rbf', C=10, gamma='scale', random_state=RANDOM_STATE)
 
-    # StratifiedKFold
-    print(f"🚀 Menjalankan {CV_FOLDS}-Fold Cross Validation...")
-    cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    # Leave-One-Out Cross Validation
+    print("🚀 Menjalankan Leave-One-Out Cross Validation (LOOCV)...")
+    cv = LeaveOneOut()
+    print(f"📈 Jumlah iterasi: {cv.get_n_splits(X_raw)}")
 
+    start = time.time()
     y_pred = cross_val_predict(clf, hog_features, y, cv=cv, n_jobs=-1)
+    print(f"✅ Proses LOOCV selesai dalam {time.time() - start:.2f} detik.\n")
 
     # Evaluasi performa
     acc = accuracy_score(y, y_pred)
@@ -91,7 +99,7 @@ def main():
     f1 = f1_score(y, y_pred, average='macro', zero_division=0)
     cm = confusion_matrix(y, y_pred)
 
-    print("\n📊 HASIL EVALUASI")
+    print("\n📊 HASIL EVALUASI (LOOCV)")
     print("="*40)
     print(f"Akurasi   : {acc*100:.2f}%")
     print(f"Presisi   : {prec*100:.2f}%")
@@ -106,6 +114,7 @@ def main():
     print("💾 confusion_matrix.npy, y_true.npy, dan y_pred.npy telah disimpan.")
 
     print("\n✅ Program selesai tanpa error.")
+
 
 if __name__ == "__main__":
     main()
